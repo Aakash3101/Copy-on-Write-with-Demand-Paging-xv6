@@ -6,6 +6,7 @@
 #include "mmu.h"
 #include "proc.h"
 #include "elf.h"
+#include "swap.h"
 
 extern char data[];  // defined by kernel.ld
 pde_t *kpgdir;  // for use in scheduler()
@@ -32,7 +33,7 @@ seginit(void)
 // Return the address of the PTE in page table pgdir
 // that corresponds to virtual address va.  If alloc!=0,
 // create any required page table pages.
-static pte_t *
+pte_t *
 walkpgdir(pde_t *pgdir, const void *va, int alloc)
 {
   pde_t *pde;
@@ -237,6 +238,7 @@ allocuvm(pde_t *pgdir, uint oldsz, uint newsz)
       deallocuvm(pgdir, newsz, oldsz);
       return 0;
     }
+
     memset(mem, 0, PGSIZE);
     if(mappages(pgdir, (char*)a, PGSIZE, V2P(mem), PTE_W|PTE_U) < 0){
       cprintf("allocuvm out of memory (2)\n");
@@ -244,6 +246,7 @@ allocuvm(pde_t *pgdir, uint oldsz, uint newsz)
       kfree(mem);
       return 0;
     }
+    myproc()->rss += PGSIZE;
   }
   return newsz;
 }
@@ -275,6 +278,7 @@ deallocuvm(pde_t *pgdir, uint oldsz, uint newsz)
       *pte = 0;
     }
   }
+  myproc()->rss = newsz;
   return newsz;
 }
 
@@ -383,6 +387,21 @@ copyout(pde_t *pgdir, uint va, void *p, uint len)
     va = va0 + PGSIZE;
   }
   return 0;
+}
+
+void page_fault_handler(){
+    // struct cpu *c = mycpu();
+    struct proc *p = myproc();
+    char *memory;
+    // pde_t *pd = (pde_t *)c->ts.cr3;
+     // page directory entry
+    // cprintf("[PAGE FAULT] Page fault by pid : %p\n", p->pid);
+    memory = kalloc();
+    // if (memory != 0)
+        // cprintf("[PAGE FAULT] Memory allocated\n");
+    swapIn(memory);
+    // cprintf("[PAGE FAULT] SwapIn successful\n");
+    p->rss += PGSIZE;
 }
 
 //PAGEBREAK!

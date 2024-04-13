@@ -91,19 +91,27 @@ main(int argc, char *argv[])
   }
 
   // 1 fs block = 1 disk sector
-  nmeta = 2 + nlog + ninodeblocks + nbitmap;
+  //nmeta = 2 +nlog + ninodeblocks + nbitmap;
+  nmeta = 2 + SWAPBLOCKS + nlog + ninodeblocks + nbitmap;
   nblocks = FSSIZE - nmeta;
 
   sb.size = xint(FSSIZE);
   sb.nblocks = xint(nblocks);
   sb.ninodes = xint(NINODES);
   sb.nlog = xint(nlog);
-  sb.logstart = xint(2);
-  sb.inodestart = xint(2+nlog);
-  sb.bmapstart = xint(2+nlog+ninodeblocks);
+  //sb.logstart = xint(2);
+  sb.logstart = xint(SWAPBLOCKS+2);
+  //sb.inodestart = xint(2+nlog);
+  sb.inodestart = xint(2+SWAPBLOCKS+nlog);
+  //sb.bmapstart = xint(2+nlog+ninodeblocks);
+  sb.bmapstart = xint(2+SWAPBLOCKS+nlog+ninodeblocks);
 
-  printf("nmeta %d (boot, super, log blocks %u inode blocks %u, bitmap blocks %u) blocks %d total %d\n",
-         nmeta, nlog, ninodeblocks, nbitmap, nblocks, FSSIZE);
+  // added
+  sb.swapblocks = xint(SWAPBLOCKS);
+  sb.swapstart = xint(2);
+
+  printf("nmeta %d (boot, super, swap blocks %u log blocks %u inode blocks %u, bitmap blocks %u) blocks %d total %d\n",
+         nmeta, SWAPBLOCKS, nlog, ninodeblocks, nbitmap, nblocks, FSSIZE);
 
   freeblock = nmeta;     // the first free block that we can allocate
 
