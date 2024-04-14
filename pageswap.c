@@ -14,10 +14,10 @@
 #define SWAPPAGES SWAPBLOCKS / 8
 struct swapinfo
 {
+    int pid;
     int page_perm;
     int is_free;
 };
-
 struct swapinfo swp[SWAPPAGES];
 
   // buffer 
@@ -49,6 +49,7 @@ void swapOut()
     // cprintf("[SWAPOUT] Current slot : %d\n", i);
     swp[i].page_perm = 0;
     swp[i].is_free = 0;
+    swp[i].pid = p->pid;
 
     // update swap slot permissions to match victim page permissions 
     swp[i].page_perm = PTE_FLAGS(*victim_pte);
@@ -100,7 +101,25 @@ void swapIn(char *memory)
         memory += BSIZE;
     }
     swp[swapIdx].is_free = 1;
+    swp[swapIdx].pid = 0;
 
     // cprintf("[SWAPIN] Swap slot freed : %d\n", swapIdx);
     // swp[swapSlot].page_perm = 0;
+}
+
+void freeSwapSlot(int pid) {
+    struct superblock sb;
+    readsb(ROOTDEV, &sb);
+    int i;
+    for (i = 0; i < SWAPPAGES; i++) {
+        if (swp[i].pid == pid)
+            break;
+    }
+    for (int j = 0; j < 8; j++) {
+        struct buf *b = bread(ROOTDEV, sb.swapstart + (8 * i) + j);
+        memset(b->data, 0, BSIZE);
+        brelse(b);
+    }
+    swp[i].is_free = 0;
+    swp[i].pid = 0;
 }

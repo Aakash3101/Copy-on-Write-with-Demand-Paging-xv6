@@ -7,6 +7,7 @@
 #include "proc.h"
 #include "spinlock.h"
 #include <stddef.h>
+#include "swap.h"
 
 struct {
   struct spinlock lock;
@@ -231,6 +232,7 @@ void
 exit(void)
 {
   struct proc *curproc = myproc();
+  freeSwapSlot(curproc->pid);
   struct proc *p;
   int fd;
 
