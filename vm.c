@@ -333,11 +333,18 @@ copyuvm(pde_t *pgdir, uint sz)
       panic("copyuvm: page not present");
     pa = PTE_ADDR(*pte);
     flags = PTE_FLAGS(*pte);
-    if((mem = kalloc()) == 0)
-      goto bad;
-    memmove(mem, (char*)P2V(pa), PGSIZE);
-    if(mappages(d, (void*)i, PGSIZE, V2P(mem), flags) < 0) {
-      kfree(mem);
+    
+    if (flags & PTE_W) {
+        flags = flags & ~PTE_W;
+        *pte = *pte & ~PTE_W;
+    }
+
+    // if((mem = kalloc()) == 0)
+    //   goto bad;
+    // memmove(mem, (char*)P2V(pa), PGSIZE);
+    
+    if(mappages(d, (void*)i, PGSIZE, pa, flags) < 0) {
+    //   kfree(mem);
       goto bad;
     }
   }
@@ -363,6 +370,7 @@ uva2ka(pde_t *pgdir, char *uva)
   return (char*)P2V(PTE_ADDR(*pte));
 }
 
+//?NEW
 // Copy len bytes from p to user address va in page table pgdir.
 // Most useful when pgdir is not the current page table.
 // uva2ka ensures this only works for PTE_U pages.
@@ -375,7 +383,9 @@ copyout(pde_t *pgdir, uint va, void *p, uint len)
   buf = (char*)p;
   while(len > 0){
     va0 = (uint)PGROUNDDOWN(va);
-    pa0 = uva2ka(pgdir, (char*)va0);
+    if (cowalloc(pgdir, va0) < 0)
+        return -1;
+    pa0 = uva2ka(pgdir, (char *)va0);
     if(pa0 == 0)
       return -1;
     n = PGSIZE - (va - va0);
@@ -402,6 +412,69 @@ void page_fault_handler(){
     swapIn(memory);
     // cprintf("[PAGE FAULT] SwapIn successful\n");
     p->rss += PGSIZE;
+}
+
+//?NEW
+// Remove npages of mappings starting from va. va must be
+// page-aligned. The mappings must exist.
+// Optionally free the physical memory.
+void uvmunmap(pde_t* pagetable, uint va, uint npages, int do_free)
+{
+    uint a;
+    pte_t *pte;
+
+    if ((va % PGSIZE) != 0)
+        panic("uvmunmap: not aligned");
+
+    for (a = va; a < va + npages * PGSIZE; a += PGSIZE)
+    {
+        if ((pte = walkpgdir(pagetable, a, 0)) == 0)
+            panic("uvmunmap: walk");
+        if (do_free)
+        {
+            uint pa = PTE2PA(*pte);
+            kfree((void *)pa);
+        }
+        *pte = 0;
+    }
+}
+
+//?NEW
+int cowalloc(pde_t *pgtab, uint va) {
+    // virtual addr is not page aligned
+    if ((va % PGSIZE) != 0)
+        return -1;
+
+    pte_t *pte = walkpgdir(pgtab, va, 0);
+
+    // page not found for the given VA
+    if (*pte == 0)
+        return -1;
+
+    uint pa = PTE_ADDR(*pte);
+
+    if (pa == 0)
+        return -1;
+
+    // Check if the page fault is raised on a COW page (PTE_C is set)
+    // If yes then allocate a new physical page, map it to the user pagetable and set the PTE_W to make it writeable
+    if(*pte & ~PTE_W) {
+        uint flags = PTE_FLAGS(*pte);
+        flags = flags | PTE_W;
+
+        char *ka = kalloc();
+        
+        // Unable to allocate physical page
+        if (ka == 0)
+            return -1;
+
+        memmove(ka, (char *)P2V(pa), PGSIZE);
+        // unmap page mapped at VA from the pagetable
+        uvmunmap(pgtab, PGROUNDUP(va), 1, 1);
+        // set new flags
+        mappages(pgtab, va, PGSIZE, V2P(ka), flags);
+    }
+    return 0;
 }
 
 //PAGEBREAK!

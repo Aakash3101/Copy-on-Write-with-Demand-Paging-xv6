@@ -95,6 +95,9 @@ struct segdesc {
 #define PTE_W           0x002   // Writeable
 #define PTE_U           0x004   // User
 
+// ?NEW
+// #define PTE_C           0x008   // COW page or not
+
 #define PTE_A           0x020   // Accessed
 #define PTE_PS          0x080   // Page Size
 
