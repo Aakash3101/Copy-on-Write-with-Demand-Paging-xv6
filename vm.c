@@ -325,27 +325,29 @@ copyuvm(pde_t *pgdir, uint sz)
 
   if((d = setupkvm()) == 0)
     return 0;
+  for (i = 0; i < sz; i += PGSIZE)
+  {
+      if ((pte = walkpgdir(pgdir, (void *)i, 0)) == 0)
+          panic("copyuvm: pte should exist");
 
-  for(i = 0; i < sz; i += PGSIZE){
-    if((pte = walkpgdir(pgdir, (void *) i, 0)) == 0)
-      panic("copyuvm: pte should exist");
-    
-    if(!(*pte & PTE_P))
-      panic("copyuvm: page not present");
-    
-    if (*pte & PTE_W) {
-        *pte |= PTE_C;
-        *pte &= ~PTE_W;
-    }
+      if (!(*pte & PTE_P))
+          panic("copyuvm: page not present");
 
-    pa = PTE_ADDR(*pte);
-    flags = PTE_FLAGS(*pte);
+      if (*pte & PTE_W)
+      {
+          *pte |= PTE_C;
+          *pte &= ~PTE_W;
+      }
 
-    if (mappages(d, (void*)i, PGSIZE, pa, flags) != 0) {
-        cprintf("uvmcopy : mappages\n");
-        goto bad;
-    }
-    incRmapRef(pa);
+      pa = PTE_ADDR(*pte);
+      flags = PTE_FLAGS(*pte);
+
+      if (mappages(d, (void *)i, PGSIZE, pa, flags) < 0)
+      {
+          cprintf("uvmcopy : mappages\n");
+          goto bad;
+      }
+      incRmapRef(pa);
   }
   return d;
 
@@ -376,31 +378,35 @@ uva2ka(pde_t *pgdir, char *uva)
 int
 copyout(pde_t *pgdir, uint va, void *p, uint len)
 {
-  char *buf;
-  uint n, pa0, va0;
+    char *buf, *pa0;
+    uint n, va0;
 
-  buf = (char*)p;
+    buf = (char *)p;
 
-  while(len > 0) {
-    va0 = PGROUNDDOWN(va);
-    pte_t *pte = walkpgdir(pgdir, (char *)va0, 0);
-    pa0 = PTE_ADDR(*pte);
+    while (len > 0)
+    {
+        va0 = PGROUNDDOWN(va);
+        pte_t *pte = walkpgdir(pgdir, (void *)va0, 0);
+        pa0 = P2V(PTE_ADDR(*pte));
+        // pa0 = uva2ka(pgdir, (char*)va0);
+        if (*pte & PTE_C)
+        {
+            if (cowalloc(pgdir, va0) < 0)
+                return -1;
+        }
 
-    if (cowalloc(pgdir, va0) < 0)
-        return -1;
+        if (pa0 == 0)
+            return -1;
 
-    if(pa0 == 0)
-      return -1;
-    
-    n = PGSIZE - (va - va0);
-    
-    if(n > len)
-      n = len;
-    
-    memmove((void*)(P2V(pa0) + (va - va0)), buf, n);
-    len -= n;
-    buf += n;
-    va = va0 + PGSIZE;
+        n = PGSIZE - (va - va0);
+
+        if (n > len)
+            n = len;
+
+        memmove(pa0 + (va - va0), buf, n);
+        len -= n;
+        buf += n;
+        va = va0 + PGSIZE;
   }
 
   return 0;
@@ -413,11 +419,13 @@ void page_fault_handler(){
     pte_t *pg = walkpgdir(pd, (void *)(addr), 0);
 
     if (*pg & PTE_C) {
+        // cprintf("COW page fault \n");
         if (cowalloc(pd, addr) < 0)
         {
             cprintf("alloc user page fault addr=%p\n", addr);
             kill(p->pid);
         }
+        // cprintf("COW page fault handled \n");
     }
     else {
         if (SWAPON) {
@@ -427,6 +435,7 @@ void page_fault_handler(){
             p->rss += PGSIZE;
         }
     }
+    // cprintf("[PAGE FAULT] handled\n");
 }
 
 //?NEW
@@ -448,7 +457,7 @@ void uvmunmap(pde_t* pagetable, uint va, uint npages, int do_free)
         if (do_free)
         {
             uint pa = PTE_ADDR(*pte);
-            kfree((void *)P2V(pa));
+            kfree(P2V(pa));
         }
         *pte = 0;
     }
@@ -457,6 +466,7 @@ void uvmunmap(pde_t* pagetable, uint va, uint npages, int do_free)
 //?NEW
 int cowalloc(pde_t* pagetable, uint va)
 {
+    // cprintf("[cowalloc] started\n");
     uint pa, new_va, va_rounded, flags;
 
     pte_t *pte = walkpgdir(pagetable, (void *)va, 0);
@@ -473,21 +483,26 @@ int cowalloc(pde_t* pagetable, uint va)
         return 0;
 
     if (getRmapRef(pa) > 1) {
+        // cprintf("[cowalloc] getRmapref > 1\n");
         if ((new_va = (uint)kalloc()) == 0)
             panic("cowalloc : kalloc");
 
-        memmove((void *)new_va, (void *)pa, PGSIZE);
+        // cprintf("[cowalloc] memmove\n");
+        memmove((void *)new_va, (void *)P2V(pa), PGSIZE);
         uvmunmap(pagetable, va_rounded, 1, 1);
+        // cprintf("[cowalloc] uvmunmap\n");
         flags &= ~PTE_C;
         flags |= PTE_W;
 
-        if (mappages(pagetable, (void*)va_rounded, PGSIZE, V2P(new_va), flags) != 0) {
+        if (mappages(pagetable, (void*)va_rounded, PGSIZE, V2P(new_va), flags) < 0) {
             kfree((void *)new_va);
             return -1;
         }
+        // cprintf("[cowalloc] mappages\n");
         return 0;
     }
     else if (getRmapRef(pa) == 1) {
+        // cprintf("[cowalloc] single page ref\n");
         *pte |= PTE_W;
         *pte &= ~PTE_C;
         return 0;
