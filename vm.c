@@ -298,7 +298,7 @@ freevm(pde_t *pgdir)
       kfree(v);
     }
   }
-  kfree((char*)pgdir);
+  kfree((char *)pgdir);
 }
 
 // Clear PTE_U on a page. Used to create an inaccessible
@@ -322,37 +322,36 @@ copyuvm(pde_t *pgdir, uint sz)
   pde_t *d;
   pte_t *pte;
   uint pa, i, flags;
-  char *mem;
 
   if((d = setupkvm()) == 0)
     return 0;
+
   for(i = 0; i < sz; i += PGSIZE){
     if((pte = walkpgdir(pgdir, (void *) i, 0)) == 0)
       panic("copyuvm: pte should exist");
+    
     if(!(*pte & PTE_P))
       panic("copyuvm: page not present");
-    pa = PTE_ADDR(*pte);
-    flags = PTE_FLAGS(*pte);
     
-    if (flags & PTE_W) {
-        flags = flags & ~PTE_W;
-        *pte = *pte & ~PTE_W;
+    if (*pte & PTE_W) {
+        *pte |= PTE_C;
+        *pte &= ~PTE_W;
     }
 
-    // if((mem = kalloc()) == 0)
-    //   goto bad;
-    // memmove(mem, (char*)P2V(pa), PGSIZE);
-    
-    if(mappages(d, (void*)i, PGSIZE, pa, flags) < 0) {
-    //   kfree(mem);
-      goto bad;
+    pa = PTE_ADDR(*pte);
+    flags = PTE_FLAGS(*pte);
+
+    if (mappages(d, (void*)i, PGSIZE, pa, flags) != 0) {
+        cprintf("uvmcopy : mappages\n");
+        goto bad;
     }
+    incRmapRef(pa);
   }
   return d;
 
 bad:
-  freevm(d);
-  return 0;
+    uvmunmap(d, 0, i / PGSIZE, 1);
+    return 0;
 }
 
 //PAGEBREAK!
@@ -377,41 +376,57 @@ uva2ka(pde_t *pgdir, char *uva)
 int
 copyout(pde_t *pgdir, uint va, void *p, uint len)
 {
-  char *buf, *pa0;
-  uint n, va0;
+  char *buf;
+  uint n, pa0, va0;
 
   buf = (char*)p;
-  while(len > 0){
-    va0 = (uint)PGROUNDDOWN(va);
+
+  while(len > 0) {
+    va0 = PGROUNDDOWN(va);
+    pte_t *pte = walkpgdir(pgdir, (char *)va0, 0);
+    pa0 = PTE_ADDR(*pte);
+
     if (cowalloc(pgdir, va0) < 0)
         return -1;
-    pa0 = uva2ka(pgdir, (char *)va0);
+
     if(pa0 == 0)
       return -1;
+    
     n = PGSIZE - (va - va0);
+    
     if(n > len)
       n = len;
-    memmove(pa0 + (va - va0), buf, n);
+    
+    memmove((void*)(P2V(pa0) + (va - va0)), buf, n);
     len -= n;
     buf += n;
     va = va0 + PGSIZE;
   }
+
   return 0;
 }
 
 void page_fault_handler(){
-    // struct cpu *c = mycpu();
     struct proc *p = myproc();
-    char *memory;
-    // pde_t *pd = (pde_t *)c->ts.cr3;
-     // page directory entry
-    // cprintf("[PAGE FAULT] Page fault by pid : %p\n", p->pid);
-    memory = kalloc();
-    // if (memory != 0)
-        // cprintf("[PAGE FAULT] Memory allocated\n");
-    swapIn(memory);
-    // cprintf("[PAGE FAULT] SwapIn successful\n");
-    p->rss += PGSIZE;
+    uint addr = rcr2();
+    pde_t *pd = p->pgdir;
+    pte_t *pg = walkpgdir(pd, (void *)(addr), 0);
+
+    if (*pg & PTE_C) {
+        if (cowalloc(pd, addr) < 0)
+        {
+            cprintf("alloc user page fault addr=%p\n", addr);
+            kill(p->pid);
+        }
+    }
+    else {
+        if (SWAPON) {
+            char *memory;
+            memory = kalloc();
+            swapIn(memory);
+            p->rss += PGSIZE;
+        }
+    }
 }
 
 //?NEW
@@ -428,53 +443,57 @@ void uvmunmap(pde_t* pagetable, uint va, uint npages, int do_free)
 
     for (a = va; a < va + npages * PGSIZE; a += PGSIZE)
     {
-        if ((pte = walkpgdir(pagetable, a, 0)) == 0)
+        if ((pte = walkpgdir(pagetable, (void*)a, 0)) == 0)
             panic("uvmunmap: walk");
         if (do_free)
         {
-            uint pa = PTE2PA(*pte);
-            kfree((void *)pa);
+            uint pa = PTE_ADDR(*pte);
+            kfree((void *)P2V(pa));
         }
         *pte = 0;
     }
 }
 
 //?NEW
-int cowalloc(pde_t *pgtab, uint va) {
-    // virtual addr is not page aligned
-    if ((va % PGSIZE) != 0)
+int cowalloc(pde_t* pagetable, uint va)
+{
+    uint pa, new_va, va_rounded, flags;
+
+    pte_t *pte = walkpgdir(pagetable, (void *)va, 0);
+    if (pte == 0)
         return -1;
 
-    pte_t *pte = walkpgdir(pgtab, va, 0);
-
-    // page not found for the given VA
-    if (*pte == 0)
+    flags = PTE_FLAGS(*pte);
+    pa = PTE_ADDR(*pte);
+    va_rounded = PGROUNDDOWN(va);
+    if (!(*pte & PTE_C) && !(*pte & PTE_W))
         return -1;
 
-    uint pa = PTE_ADDR(*pte);
+    if ((*pte & PTE_W) || !(*pte & PTE_C))
+        return 0;
 
-    if (pa == 0)
-        return -1;
+    if (getRmapRef(pa) > 1) {
+        if ((new_va = (uint)kalloc()) == 0)
+            panic("cowalloc : kalloc");
 
-    // Check if the page fault is raised on a COW page (PTE_C is set)
-    // If yes then allocate a new physical page, map it to the user pagetable and set the PTE_W to make it writeable
-    if(*pte & ~PTE_W) {
-        uint flags = PTE_FLAGS(*pte);
-        flags = flags | PTE_W;
+        memmove((void *)new_va, (void *)pa, PGSIZE);
+        uvmunmap(pagetable, va_rounded, 1, 1);
+        flags &= ~PTE_C;
+        flags |= PTE_W;
 
-        char *ka = kalloc();
-        
-        // Unable to allocate physical page
-        if (ka == 0)
+        if (mappages(pagetable, (void*)va_rounded, PGSIZE, V2P(new_va), flags) != 0) {
+            kfree((void *)new_va);
             return -1;
-
-        memmove(ka, (char *)P2V(pa), PGSIZE);
-        // unmap page mapped at VA from the pagetable
-        uvmunmap(pgtab, PGROUNDUP(va), 1, 1);
-        // set new flags
-        mappages(pgtab, va, PGSIZE, V2P(ka), flags);
+        }
+        return 0;
     }
-    return 0;
+    else if (getRmapRef(pa) == 1) {
+        *pte |= PTE_W;
+        *pte &= ~PTE_C;
+        return 0;
+    }
+
+    return -1;
 }
 
 //PAGEBREAK!

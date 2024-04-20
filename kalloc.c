@@ -25,6 +25,37 @@ struct {
   struct run *freelist;
 } kmem;
 
+struct
+{
+    struct spinlock lock;
+    int ref[PHYSTOP / PGSIZE];
+} rmap;
+
+int getRmapRef(uint pa) {
+    acquire(&rmap.lock);
+    int num = rmap.ref[pa / PGSIZE];
+    release(&rmap.lock);
+    return num;
+}
+
+void setRmapRef(uint pa, int val) {
+    acquire(&rmap.lock);
+    rmap.ref[pa / PGSIZE] = val;
+    release(&rmap.lock);
+}
+
+void incRmapRef(uint pa) {
+    acquire(&rmap.lock);
+    ++rmap.ref[pa / PGSIZE];
+    release(&rmap.lock);
+}
+
+void decRmapRef(uint pa) {
+    acquire(&rmap.lock);
+    --rmap.ref[pa / PGSIZE];
+    release(&rmap.lock);
+}
+
 // Initialization happens in two phases.
 // 1. main() calls kinit1() while still using entrypgdir to place just
 // the pages mapped by entrypgdir on free list.
@@ -34,6 +65,7 @@ void
 kinit1(void *vstart, void *vend)
 {
   initlock(&kmem.lock, "kmem");
+  initlock(&rmap.lock, "rmap");
   kmem.use_lock = 0;
   freerange(vstart, vend);
 }
@@ -52,8 +84,9 @@ freerange(void *vstart, void *vend)
   p = (char*)PGROUNDUP((uint)vstart);
   for(; p + PGSIZE <= (char*)vend; p += PGSIZE)
   {
-    kfree(p);
-    kmem.num_free_pages+=1;
+      rmap.ref[V2P(p) / PGSIZE] = 1;
+      kfree(p);
+      //   kmem.num_free_pages += 1;
   }
     
 }
@@ -67,8 +100,20 @@ kfree(char *v)
 {
   struct run *r;
 
-  if((uint)v % PGSIZE || v < end || V2P(v) >= PHYSTOP)
-    panic("kfree");
+  if((uint)v % PGSIZE || v < end || V2P(v) >= PHYSTOP) {
+      cprintf("page aligned : %d\n", (uint)v % PGSIZE);
+      cprintf("virtual end : %d\n", v < end);
+      cprintf("larger then physical mem : %d\n", V2P(v) >= PHYSTOP);
+      panic("kfree");
+  }
+
+  // If the number of references is greater than 1,
+  // there is no need to free the memory
+  if (getRmapRef(V2P(v)) > 1)
+  {
+      decRmapRef(V2P(v));
+      return;
+  }
 
   // Fill with junk to catch dangling refs.
   memset(v, 1, PGSIZE);
@@ -98,14 +143,18 @@ kalloc(void)
     {
         kmem.freelist = r->next;
         kmem.num_free_pages -= 1;
+        setRmapRef(V2P(r), 1);
+        cprintf("Num free pages : %d\n", kmem.num_free_pages);
     }
 
     if (kmem.use_lock)
         release(&kmem.lock);
     
-    if (!r) {
-        swapOut();
-        return kalloc();
+    if (SWAPON) {
+        if (!r) {
+            swapOut();
+            return kalloc();
+        }
     }
 
     return (char *)r;

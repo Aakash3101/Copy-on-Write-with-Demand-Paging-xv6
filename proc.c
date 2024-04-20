@@ -194,10 +194,10 @@ fork(void)
 
   // Copy process state from proc.
   if((np->pgdir = copyuvm(curproc->pgdir, curproc->sz)) == 0){
-    kfree(np->kstack);
-    np->kstack = 0;
-    np->state = UNUSED;
-    return -1;
+      kfree(np->kstack);
+      np->kstack = 0;
+      np->state = UNUSED;
+      return -1;
   }
   np->sz = curproc->sz;
   np->rss = curproc->rss;
@@ -232,7 +232,8 @@ void
 exit(void)
 {
   struct proc *curproc = myproc();
-  freeSwapSlot(curproc->pid);
+  if (SWAPON)
+    freeSwapSlot(curproc->pid);
   struct proc *p;
   int fd;
 

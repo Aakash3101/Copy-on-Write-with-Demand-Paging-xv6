@@ -18,6 +18,7 @@ struct swapinfo
     int page_perm;
     int is_free;
 };
+
 struct swapinfo swp[SWAPPAGES];
 
   // buffer 
@@ -75,6 +76,7 @@ void swapOut()
     lcr3(V2P(p->pgdir));
     // cprintf("[SWAPOUT] Swap slot block no : %d\n", *victim_pte >> 12);
     // cprintf("[SWAPOUT] VA : %p\n", pa);
+    cprintf("[SWAPOUT] kfree\n");
     kfree(pa);
     // cprintf("[SWAPOUT] Page freed by swapOut\n");
     // return (char *)victim_page_VA;

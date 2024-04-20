@@ -1,3 +1,5 @@
+#define SWAPON 0
+
 struct buf;
 struct context;
 struct file;
@@ -70,6 +72,10 @@ uint            num_of_FreePages(void);
 void            kfree(char*);
 void            kinit1(void*, void*);
 void            kinit2(void*, void*);
+int             getRmapRef(uint);
+void            setRmapRef(uint, int);
+void            incRmapRef(uint);
+void            decRmapRef(uint);
 
 // kbd.c
 void            kbdintr(void);
@@ -194,5 +200,7 @@ void            clearpteu(pde_t *pgdir, char *uva);
 void            page_fault_handler();
 pte_t           *walkpgdir(pde_t *, const void *, int);
 void            swapInit(void);
+int            cowalloc(pde_t *, uint);
+void            uvmunmap(pde_t *, uint, uint, int);
 // number of elements in fixed-size array
 #define NELEM(x) (sizeof(x)/sizeof((x)[0]))
