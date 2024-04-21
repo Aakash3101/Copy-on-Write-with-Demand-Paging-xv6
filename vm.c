@@ -298,7 +298,7 @@ freevm(pde_t *pgdir)
       kfree(v);
     }
   }
-  kfree((char*)pgdir);
+  kfree((char *)pgdir);
 }
 
 // Clear PTE_U on a page. Used to create an inaccessible
@@ -314,6 +314,7 @@ clearpteu(pde_t *pgdir, char *uva)
   *pte &= ~PTE_U;
 }
 
+//? UPDATED
 // Given a parent process's page table, create a copy
 // of it for a child.
 pde_t*
@@ -322,30 +323,35 @@ copyuvm(pde_t *pgdir, uint sz)
   pde_t *d;
   pte_t *pte;
   uint pa, i, flags;
-  char *mem;
 
   if((d = setupkvm()) == 0)
     return 0;
-  for(i = 0; i < sz; i += PGSIZE){
-    if((pte = walkpgdir(pgdir, (void *) i, 0)) == 0)
-      panic("copyuvm: pte should exist");
-    if(!(*pte & PTE_P))
-      panic("copyuvm: page not present");
-    pa = PTE_ADDR(*pte);
-    flags = PTE_FLAGS(*pte);
-    if((mem = kalloc()) == 0)
-      goto bad;
-    memmove(mem, (char*)P2V(pa), PGSIZE);
-    if(mappages(d, (void*)i, PGSIZE, V2P(mem), flags) < 0) {
-      kfree(mem);
-      goto bad;
-    }
+  for (i = 0; i < sz; i += PGSIZE)
+  {
+      if ((pte = walkpgdir(pgdir, (void *)i, 0)) == 0)
+          panic("copyuvm: pte should exist");
+
+      if (!(*pte & PTE_P))
+          panic("copyuvm: page not present");
+
+      *pte &= ~PTE_W;
+      pa = PTE_ADDR(*pte);
+      flags = PTE_FLAGS(*pte);
+
+      if (mappages(d, (void *)i, PGSIZE, pa, flags) < 0)
+      {
+          cprintf("uvmcopy : mappages\n");
+          goto bad;
+      }
+      incRmapRef(pa);
   }
+  lcr3(V2P(pgdir));
   return d;
 
 bad:
-  freevm(d);
-  return 0;
+    freevm(d);
+    lcr3(V2P(pgdir));
+    return 0;
 }
 
 //PAGEBREAK!
@@ -369,39 +375,86 @@ uva2ka(pde_t *pgdir, char *uva)
 int
 copyout(pde_t *pgdir, uint va, void *p, uint len)
 {
-  char *buf, *pa0;
-  uint n, va0;
+    char *buf, *pa0;
+    uint n, va0;
 
-  buf = (char*)p;
-  while(len > 0){
-    va0 = (uint)PGROUNDDOWN(va);
-    pa0 = uva2ka(pgdir, (char*)va0);
-    if(pa0 == 0)
-      return -1;
-    n = PGSIZE - (va - va0);
-    if(n > len)
-      n = len;
-    memmove(pa0 + (va - va0), buf, n);
-    len -= n;
-    buf += n;
-    va = va0 + PGSIZE;
+    buf = (char *)p;
+
+    while (len > 0)
+    {
+        va0 = PGROUNDDOWN(va);
+        pa0 = uva2ka(pgdir, (char*)va0);
+
+        if (pa0 == 0)
+            return -1;
+
+        n = PGSIZE - (va - va0);
+
+        if (n > len)
+            n = len;
+
+        memmove(pa0 + (va - va0), buf, n);
+        len -= n;
+        buf += n;
+        va = va0 + PGSIZE;
   }
+
   return 0;
 }
 
 void page_fault_handler(){
-    // struct cpu *c = mycpu();
     struct proc *p = myproc();
-    char *memory;
-    // pde_t *pd = (pde_t *)c->ts.cr3;
-     // page directory entry
-    // cprintf("[PAGE FAULT] Page fault by pid : %p\n", p->pid);
-    memory = kalloc();
-    // if (memory != 0)
-        // cprintf("[PAGE FAULT] Memory allocated\n");
-    swapIn(memory);
-    // cprintf("[PAGE FAULT] SwapIn successful\n");
-    p->rss += PGSIZE;
+    uint addr = rcr2();
+    pde_t *pd = p->pgdir;
+    pte_t *pg = walkpgdir(pd, (void *)(addr), 0);
+
+    if (!(*pg & PTE_W) && (*pg & PTE_P))
+    {
+        if (cowalloc(pd, addr) < 0)
+        {
+            cprintf("alloc user page fault addr=%p\n", addr);
+        }
+    }
+    else {
+        if (SWAPON) {
+            char *memory;
+            memory = kalloc();
+            swapIn(memory);
+            p->rss += PGSIZE;
+        }
+    }
+}
+
+
+//?NEW
+int cowalloc(pde_t* pagetable, uint va)
+{
+    uint pa;
+    char *new_va;
+
+    pte_t *pte = walkpgdir(pagetable, (void *)va, 0);
+    if (pte == 0)
+        panic("[COWALLOC] no page present");
+
+    pa = PTE_ADDR(*pte);
+
+    if (getRmapRef(pa) > 1) {
+        if ((new_va = kalloc()) == 0)
+            panic("cowalloc : kalloc");
+
+        memmove(new_va, (void *)P2V(pa), PGSIZE);
+        *pte = V2P(new_va) | PTE_W | PTE_U | PTE_P;
+        decRmapRef(pa);
+        lcr3(V2P(pagetable));
+        return 0;
+    }
+    else if (getRmapRef(pa) == 1) {
+        *pte |= PTE_W;
+        lcr3(V2P(pagetable));
+        return 0;
+    }
+
+    return -1;
 }
 
 //PAGEBREAK!

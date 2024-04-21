@@ -68,6 +68,7 @@ exec(char *path, char **argv)
   clearpteu(pgdir, (char*)(sz - 2*PGSIZE));
   sp = sz;
 
+//   cprintf("[exec] push arguemnt string onto stack\n");
   // Push argument strings, prepare rest of stack in ustack.
   for(argc = 0; argv[argc]; argc++) {
     if(argc >= MAXARG)
@@ -75,8 +76,9 @@ exec(char *path, char **argv)
     sp = (sp - (strlen(argv[argc]) + 1)) & ~3;
     if(copyout(pgdir, sp, argv[argc], strlen(argv[argc]) + 1) < 0)
       goto bad;
-    ustack[3+argc] = sp;
+    ustack[3 + argc] = sp;
   }
+//   cprintf("[exec] push arguemnt string onto stack completed\n");
   ustack[3+argc] = 0;
 
   ustack[0] = 0xffffffff;  // fake return PC

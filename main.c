@@ -33,7 +33,8 @@ main(void)
   ideinit();       // disk 
   startothers();   // start other processors
   kinit2(P2V(4*1024*1024), P2V(PHYSTOP)); // must come after startothers()
-  swapInit();
+  if (SWAPON)
+    swapInit();
   userinit();      // first user process
   mpmain();        // finish this processor's setup
 }
@@ -55,7 +56,7 @@ mpmain(void)
   cprintf("cpu%d: starting %d\n", cpuid(), cpuid());
   idtinit();       // load idt register
   xchg(&(mycpu()->started), 1); // tell startothers() we're up
-  scheduler();     // start running processes
+  scheduler(); // start running processes
 }
 
 pde_t entrypgdir[];  // For entry.S
