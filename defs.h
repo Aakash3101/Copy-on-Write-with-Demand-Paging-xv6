@@ -200,7 +200,6 @@ void            clearpteu(pde_t *pgdir, char *uva);
 void            page_fault_handler();
 pte_t           *walkpgdir(pde_t *, const void *, int);
 void            swapInit(void);
-int            cowalloc(pde_t *, uint);
-void            uvmunmap(pde_t *, uint, uint, int);
+int             cowalloc(pde_t *, uint);
 // number of elements in fixed-size array
 #define NELEM(x) (sizeof(x)/sizeof((x)[0]))

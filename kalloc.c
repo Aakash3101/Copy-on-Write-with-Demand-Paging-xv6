@@ -98,7 +98,7 @@ void freerange(void *vstart, void *vend)
     p = (char *)PGROUNDUP((uint)vstart);
     for (; p + PGSIZE <= (char *)vend; p += PGSIZE)
     {
-        rmap.ref[V2P(p) / PGSIZE] = 1;
+        rmap.ref[V2P(p) / PGSIZE] = 0;
         kfree(p);
         //   kmem.num_free_pages += 1;
     }
@@ -122,10 +122,9 @@ void kfree(char *v)
 
     // If the number of references is greater than 1,
     // there is no need to free the memory
-    if (getRmapRef(V2P(v)) > 1)
+    decRmapRef(V2P(v));
+    if (getRmapRef(V2P(v)) > 0)
     {
-        // cprintf("[kfree] ref count dec\n");
-        decRmapRef(V2P(v));
         return;
     }
 
@@ -158,7 +157,6 @@ kalloc(void)
         kmem.freelist = r->next;
         kmem.num_free_pages -= 1;
         setRmapRef(V2P(r), 1);
-        // cprintf("Num free pages : %d\n", kmem.num_free_pages);
     }
 
     if (kmem.use_lock)
