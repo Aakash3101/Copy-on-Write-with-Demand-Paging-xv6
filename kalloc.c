@@ -32,7 +32,50 @@ struct
     int use_lock;
     struct spinlock lock;
     int ref[PHYSTOP / PGSIZE];
+    ull pid[PHYSTOP / PGSIZE];
 } rmap;
+
+ull getRmapPagePid(uint pa) {
+    if (rmap.use_lock)
+        acquire(&rmap.lock);
+
+    ull result_pids = rmap.pid[pa / PGSIZE];
+
+    if (rmap.use_lock)
+        release(&rmap.lock);
+
+    return result_pids;
+}
+
+void setRmapPagePid(uint pa, uint pid) {
+    if (rmap.use_lock)
+        acquire(&rmap.lock);
+
+    rmap.pid[pa / PGSIZE] |= (1ULL<<pid);
+
+    if (rmap.use_lock)
+        release(&rmap.lock);
+}
+
+void unsetRmapPagePid(uint pa, uint pid) {
+    if (rmap.use_lock)
+        acquire(&rmap.lock);
+
+    rmap.pid[pa / PGSIZE] &= ~(1ULL<<pid);
+
+    if (rmap.use_lock)
+        release(&rmap.lock);
+}
+
+void setAllRmapPagePid(uint pa, ull val) {
+    if (rmap.use_lock)
+        acquire(&rmap.lock);
+
+    rmap.pid[pa / PGSIZE] = val;
+
+    if (rmap.use_lock)
+        release(&rmap.lock);
+}
 
 int getRmapRef(uint pa)
 {
@@ -80,8 +123,8 @@ void kinit1(void *vstart, void *vend)
 {
     initlock(&kmem.lock, "kmem");
     initlock(&rmap.lock, "rmap");
-    kmem.use_lock = 0;
     rmap.use_lock = 0;
+    kmem.use_lock = 0;
     freerange(vstart, vend);
 }
 
@@ -99,6 +142,7 @@ void freerange(void *vstart, void *vend)
     for (; p + PGSIZE <= (char *)vend; p += PGSIZE)
     {
         rmap.ref[V2P(p) / PGSIZE] = 0;
+        rmap.pid[V2P(p) / PGSIZE] = 0ULL;
         kfree(p);
         //   kmem.num_free_pages += 1;
     }
@@ -130,7 +174,7 @@ void kfree(char *v)
 
     // Fill with junk to catch dangling refs.
     memset(v, 1, PGSIZE);
-
+    setAllRmapPagePid(V2P(v), 0ULL);
     if (kmem.use_lock)
         acquire(&kmem.lock);
     r = (struct run *)v;

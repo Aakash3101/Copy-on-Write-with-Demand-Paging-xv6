@@ -193,7 +193,7 @@ fork(void)
   }
 
   // Copy process state from proc.
-  if((np->pgdir = copyuvm(curproc->pgdir, curproc->sz)) == 0){
+  if((np->pgdir = copyuvm(curproc->pgdir, curproc->sz, curproc->pid, np->pid)) == 0){
       kfree(np->kstack);
       np->kstack = 0;
       np->state = UNUSED;
@@ -252,7 +252,6 @@ exit(void)
   iput(curproc->cwd);
   end_op();
   curproc->cwd = 0;
-
   acquire(&ptable.lock);
 
   // Parent might be sleeping in wait().
@@ -578,6 +577,17 @@ struct proc *find_victim_process(void) {
     release(&ptable.lock);
     // cprintf("Victim Process id : %p\n", pid);
     return victim_p;
+}
+
+struct proc* getProcByPid(int pid) {
+    struct proc *p;
+    acquire(&ptable.lock);
+    for (p = ptable.proc; p < &ptable.proc[NPROC]; p++) {
+        if (p->pid == pid)
+            break;
+    }
+    release(&ptable.lock);
+    return p;
 }
 
 //TODO

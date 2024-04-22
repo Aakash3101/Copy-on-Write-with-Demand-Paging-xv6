@@ -318,7 +318,7 @@ clearpteu(pde_t *pgdir, char *uva)
 // Given a parent process's page table, create a copy
 // of it for a child.
 pde_t*
-copyuvm(pde_t *pgdir, uint sz)
+copyuvm(pde_t *pgdir, uint sz, int parentPID, int childPID)
 {
   pde_t *d;
   pte_t *pte;
@@ -344,6 +344,8 @@ copyuvm(pde_t *pgdir, uint sz)
           goto bad;
       }
       incRmapRef(pa);
+      setRmapPagePid(pa, (uint)(parentPID - 1));
+      setRmapPagePid(pa, (uint)(childPID - 1));
   }
   lcr3(V2P(pgdir));
   return d;
@@ -407,12 +409,11 @@ void page_fault_handler(){
     uint addr = rcr2();
     pde_t *pd = p->pgdir;
     pte_t *pg = walkpgdir(pd, (void *)(addr), 0);
-
     if (!(*pg & PTE_W) && (*pg & PTE_P))
     {
-        if (cowalloc(pd, addr) < 0)
+        if (cowalloc(p->pid, pd, addr) < 0)
         {
-            cprintf("alloc user page fault addr=%p\n", addr);
+            kill(p->pid);
         }
     }
     else {
@@ -427,7 +428,7 @@ void page_fault_handler(){
 
 
 //?NEW
-int cowalloc(pde_t* pagetable, uint va)
+int cowalloc(int pid, pde_t* pagetable, uint va)
 {
     uint pa;
     char *new_va;
@@ -444,6 +445,7 @@ int cowalloc(pde_t* pagetable, uint va)
 
         memmove(new_va, (void *)P2V(pa), PGSIZE);
         *pte = V2P(new_va) | PTE_W | PTE_U | PTE_P;
+        unsetRmapPagePid(pa, (uint)(pid-1));
         decRmapRef(pa);
         lcr3(V2P(pagetable));
         return 0;

@@ -1,4 +1,4 @@
-#define SWAPON 0
+#define SWAPON 1
 
 struct buf;
 struct context;
@@ -76,9 +76,13 @@ int             getRmapRef(uint);
 void            setRmapRef(uint, int);
 void            incRmapRef(uint);
 void            decRmapRef(uint);
+void            setRmapPagePid(uint, uint);
+void            unsetRmapPagePid(uint, uint);
+ull             getRmapPagePid(uint);
+void            setAllRmapPagePid(uint, ull);
 
 // kbd.c
-void            kbdintr(void);
+void kbdintr(void);
 
 // lapic.c
 void            cmostime(struct rtcdate *r);
@@ -130,6 +134,7 @@ void            wakeup(void*);
 void            yield(void);
 void            print_rss(void);
 uint            find_victim_page(struct proc*);
+struct proc *   getProcByPid(int pid);
 struct proc *   find_victim_process(void);
 
 // swtch.S
@@ -191,7 +196,7 @@ int             deallocuvm(pde_t*, uint, uint);
 void            freevm(pde_t*);
 void            inituvm(pde_t*, char*, uint);
 int             loaduvm(pde_t*, char*, struct inode*, uint, uint);
-pde_t*          copyuvm(pde_t*, uint);
+pde_t*          copyuvm(pde_t*, uint, int, int);
 void            switchuvm(struct proc*);
 void            switchkvm(void);
 int             copyout(pde_t*, uint, void*, uint);
@@ -200,6 +205,6 @@ void            clearpteu(pde_t *pgdir, char *uva);
 void            page_fault_handler();
 pte_t           *walkpgdir(pde_t *, const void *, int);
 void            swapInit(void);
-int             cowalloc(pde_t *, uint);
+int             cowalloc(int, pde_t *, uint);
 // number of elements in fixed-size array
 #define NELEM(x) (sizeof(x)/sizeof((x)[0]))
