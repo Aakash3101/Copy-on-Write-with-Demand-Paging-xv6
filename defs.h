@@ -80,6 +80,8 @@ void            setRmapPagePid(uint, uint);
 void            unsetRmapPagePid(uint, uint);
 ull             getRmapPagePid(uint);
 void            setAllRmapPagePid(uint, ull);
+void            lock_rmap();
+void            release_rmap();
 
 // kbd.c
 void kbdintr(void);

@@ -35,83 +35,90 @@ struct
     ull pid[PHYSTOP / PGSIZE];
 } rmap;
 
-ull getRmapPagePid(uint pa) {
+void lock_rmap()
+{
     if (rmap.use_lock)
         acquire(&rmap.lock);
 
-    ull result_pids = rmap.pid[pa / PGSIZE];
-
+    return;
+}
+void release_rmap()
+{
     if (rmap.use_lock)
         release(&rmap.lock);
+    return;
+}
+
+ull getRmapPagePid(uint pa) {
+    lock_rmap();
+
+    ull result_pids = rmap.pid[pa / PGSIZE];
+
+    release_rmap();
 
     return result_pids;
 }
 
 void setRmapPagePid(uint pa, uint pid) {
-    if (rmap.use_lock)
-        acquire(&rmap.lock);
+    lock_rmap();
 
     rmap.pid[pa / PGSIZE] |= (1ULL<<pid);
 
-    if (rmap.use_lock)
-        release(&rmap.lock);
+    release_rmap();
 }
 
 void unsetRmapPagePid(uint pa, uint pid) {
-    if (rmap.use_lock)
-        acquire(&rmap.lock);
+    lock_rmap();
 
     rmap.pid[pa / PGSIZE] &= ~(1ULL<<pid);
 
-    if (rmap.use_lock)
-        release(&rmap.lock);
+    release_rmap();
 }
 
 void setAllRmapPagePid(uint pa, ull val) {
-    if (rmap.use_lock)
-        acquire(&rmap.lock);
+    lock_rmap();
 
     rmap.pid[pa / PGSIZE] = val;
 
-    if (rmap.use_lock)
-        release(&rmap.lock);
+    release_rmap();
 }
 
 int getRmapRef(uint pa)
 {
-    if (rmap.use_lock)
-        acquire(&rmap.lock);
+    lock_rmap();
+
     int num = rmap.ref[pa / PGSIZE];
-    if (rmap.use_lock)
-        release(&rmap.lock);
+    
+    release_rmap();
+    
     return num;
 }
 
 void setRmapRef(uint pa, int val)
 {
-    if (rmap.use_lock)
-        acquire(&rmap.lock);
+    lock_rmap();
+    
     rmap.ref[pa / PGSIZE] = val;
-    if (rmap.use_lock)
-        release(&rmap.lock);
+    
+    release_rmap();
 }
 
 void incRmapRef(uint pa)
 {
-    if (rmap.use_lock)
-        acquire(&rmap.lock);
+    lock_rmap();
+
     ++rmap.ref[pa / PGSIZE];
-    if (rmap.use_lock)
-        release(&rmap.lock);
+    
+    release_rmap();
 }
 
 void decRmapRef(uint pa)
 {
-    if (rmap.use_lock)
-        acquire(&rmap.lock);
+    lock_rmap();
+
     --rmap.ref[pa / PGSIZE];
-    if (rmap.use_lock)
-        release(&rmap.lock);
+    
+    release_rmap();
 }
 
 // Initialization happens in two phases.
